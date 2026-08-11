@@ -18,6 +18,7 @@ def _parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--input", type=Path, help="UTF-8 файл із текстом або брифом")
     source.add_argument("--text", help="Текст або бриф безпосередньо в командному рядку")
+    source.add_argument("--plan-in", type=Path, help="Готовий NarrationPlan JSON для рендеру без Ollama")
 
     parser.add_argument("--mode", choices=["edit", "generate"], default="edit")
     parser.add_argument("--seconds", type=int, help="Бажана тривалість наративу")
@@ -45,32 +46,38 @@ def _parser() -> argparse.ArgumentParser:
 def _read_source(args: argparse.Namespace) -> str:
     if args.input:
         return args.input.read_text(encoding="utf-8")
-    return args.text
+    return args.text or ""
 
 
 def main() -> None:
     args = _parser().parse_args()
-    source = _read_source(args).strip()
-    if not source:
-        raise SystemExit("Вхідний текст порожній.")
+    if args.plan_in:
+        from .models import NarrationPlan
 
-    if args.no_llm:
-        plan = prepare_without_llm(source)
+        plan = NarrationPlan.model_validate_json(args.plan_in.read_text(encoding="utf-8"))
+        print(f"Plan: {args.plan_in} ({len(plan.segments)} segments)")
     else:
-        plan = prepare_with_ollama(
-            source,
-            model=args.ollama_model,
-            host=args.ollama_host,
-            mode=args.mode,
-            target_seconds=args.seconds,
-        )
+        source = _read_source(args).strip()
+        if not source:
+            raise SystemExit("Вхідний текст порожній.")
 
-    args.plan_out.parent.mkdir(parents=True, exist_ok=True)
-    args.plan_out.write_text(
-        json.dumps(plan.model_dump(), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    print(f"Plan: {args.plan_out} ({len(plan.segments)} segments)")
+        if args.no_llm:
+            plan = prepare_without_llm(source)
+        else:
+            plan = prepare_with_ollama(
+                source,
+                model=args.ollama_model,
+                host=args.ollama_host,
+                mode=args.mode,
+                target_seconds=args.seconds,
+            )
+
+        args.plan_out.parent.mkdir(parents=True, exist_ok=True)
+        args.plan_out.write_text(
+            json.dumps(plan.model_dump(), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"Plan: {args.plan_out} ({len(plan.segments)} segments)")
 
     if args.plan_only:
         return
