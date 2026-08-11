@@ -5,7 +5,7 @@
 ```text
 текст / бриф
    ↓
-Ollama + Gemma 4
+Ollama + gemma4:latest
    ↓
 NarrationPlan (text + tts_text + pause_after_ms)
    ↓
@@ -18,34 +18,97 @@ Silero V5 CIS (ukr_roman)
 
 - `edit` — перетворює готовий український матеріал на природний дикторський текст без додавання нових фактів;
 - `generate` — створює наратив із короткого брифу;
-- Gemma 4 повертає валідований JSON plan через Ollama Structured Outputs;
+- `gemma4:latest` повертає валідований JSON plan через Ollama Structured Outputs;
 - окремо зберігаються `text` для людини та `tts_text` для синтезатора;
 - для кожного сегмента задається `pause_after_ms`;
 - Silero генерує український голос локально;
 - сегменти та паузи об'єднуються у WAV без залежності від FFmpeg;
-- є режим `--no-llm`, який працює без Ollama.
+- є режим `--no-llm`, який працює без Ollama;
+- готовий `plan.json` можна рендерити повторно без запуску Gemma.
 
-## 1. Підготовка Ollama
+За замовчуванням CLI використовує:
 
-Переконайтеся, що Ollama встановлена і сервер працює:
+```text
+Ollama model: gemma4:latest
+Silero model: v5_cis_base
+Speaker:      ukr_roman
+Sample rate:  48000 Hz
+```
+
+Модель можна перевизначити через `--ollama-model` або змінну середовища `LOCALTTS_OLLAMA_MODEL`.
+
+---
+
+# Послідовність перевірки і генерації
+
+## 1. Отримати актуальну гілку
+
+```bash
+git fetch origin
+git checkout agent/local-ollama-silero-pipeline
+git pull
+```
+
+## 2. Перевірити Ollama
+
+Версія:
+
+```bash
+ollama --version
+```
+
+Перелік локальних моделей:
+
+```bash
+ollama list
+```
+
+У списку має бути:
+
+```text
+gemma4:latest
+```
+
+Якщо моделі немає:
+
+```bash
+ollama pull gemma4:latest
+```
+
+## 3. Перевірити, що Ollama server працює
+
+У більшості інсталяцій Ollama service вже працює у фоні. Перевірка:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+Якщо сервер не запущений:
 
 ```bash
 ollama serve
 ```
 
-Завантажте модель:
+Якщо `ollama serve` повідомляє, що порт `11434` уже зайнятий, це зазвичай означає, що Ollama вже працює як service.
+
+## 4. Smoke test gemma4:latest
 
 ```bash
-ollama pull gemma4:12b
+ollama run gemma4:latest "Відповідай українською одним реченням: тест локальної моделі успішний."
 ```
 
-Для меншого використання пам'яті можна спробувати:
+Після цього можна перевірити API:
 
 ```bash
-ollama pull gemma4:e4b
+curl http://localhost:11434/api/generate \
+  -d '{
+    "model": "gemma4:latest",
+    "prompt": "Напиши одне коротке речення українською.",
+    "stream": false
+  }'
 ```
 
-## 2. Python environment
+## 5. Створити Python environment
 
 ```bash
 python3 -m venv .venv
@@ -54,21 +117,124 @@ python -m pip install --upgrade pip
 pip install -e .
 ```
 
-Перевірка GPU у PyTorch:
+Перевірити CLI:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+localtts --help
 ```
 
-## 3. Перший запуск
+## 6. Перевірити Python package
 
-Відредагувати готовий текст і створити аудіо:
+```bash
+python -m compileall src tests
+python -m pytest -q
+```
+
+## 7. Перевірити PyTorch і GPU
+
+```bash
+python -c "import torch; print('torch=', torch.__version__); print('cuda=', torch.cuda.is_available()); print('device=', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
+```
+
+Якщо CUDA недоступна, pipeline все одно може працювати через CPU:
+
+```bash
+--device cpu
+```
+
+## 8. Перевірити pipeline без LLM
+
+Цей крок перевіряє Python + Silero окремо від Ollama:
+
+```bash
+localtts \
+  --input examples/input_uk.txt \
+  --no-llm \
+  --device auto \
+  --output output/test_no_llm.wav
+```
+
+Очікуваний результат:
+
+```text
+output/plan.json
+output/test_no_llm.wav
+```
+
+## 9. Перевірити тільки Gemma і план наративу
+
+Без запуску TTS:
 
 ```bash
 localtts \
   --input examples/input_uk.txt \
   --mode edit \
   --seconds 60 \
+  --plan-only \
+  --plan-out output/test_plan.json
+```
+
+CLI автоматично використає:
+
+```text
+gemma4:latest
+```
+
+Явне задання моделі, якщо потрібно:
+
+```bash
+localtts \
+  --input examples/input_uk.txt \
+  --mode edit \
+  --seconds 60 \
+  --ollama-model gemma4:latest \
+  --plan-only \
+  --plan-out output/test_plan.json
+```
+
+Переглянути результат:
+
+```bash
+cat output/test_plan.json
+```
+
+Очікувана структура:
+
+```json
+{
+  "title": "Український наратив",
+  "language": "uk-UA",
+  "segments": [
+    {
+      "text": "Текст для читання людиною.",
+      "tts_text": "Текст, підготовлений для синтезатора.",
+      "pause_after_ms": 450
+    }
+  ]
+}
+```
+
+## 10. Рендер готового plan через Silero
+
+Після перевірки або ручного редагування JSON:
+
+```bash
+localtts \
+  --plan-in output/test_plan.json \
+  --device auto \
+  --output output/test_narration.wav
+```
+
+Цей запуск НЕ викликає Ollama повторно.
+
+## 11. Повний цикл одним запуском
+
+```bash
+localtts \
+  --input examples/input_uk.txt \
+  --mode edit \
+  --seconds 60 \
+  --device auto \
   --output output/narration.wav
 ```
 
@@ -79,60 +245,99 @@ output/plan.json
 output/narration.wav
 ```
 
-`plan.json` можна переглянути перед TTS:
-
-```json
-{
-  "title": "Український наратив",
-  "language": "uk-UA",
-  "segments": [
-    {
-      "text": "...",
-      "tts_text": "...",
-      "pause_after_ms": 450
-    }
-  ]
-}
-```
-
-## 4. Створення тексту з брифу
+## 12. Генерація наративу з короткого брифу
 
 ```bash
 localtts \
-  --text "Вступ до заняття про застосування ШІ в аналітичній діяльності. Аудиторія — офіцери оперативного рівня." \
+  --text "Створи вступ до заняття про застосування штучного інтелекту в аналітичній діяльності. Аудиторія — офіцери оперативного рівня. Стиль — спокійний навчальний наратив." \
   --mode generate \
   --seconds 90 \
   --output output/intro.wav
 ```
 
-## 5. Спочатку лише текст і паузи
+## 13. Використання окремого example file
+
+У репозиторії є:
+
+```text
+examples/demo_narration_uk.txt
+examples/demo_plan_uk.json
+```
+
+Перевірка Gemma:
 
 ```bash
 localtts \
-  --input examples/input_uk.txt \
+  --input examples/demo_narration_uk.txt \
   --mode edit \
-  --seconds 90 \
-  --plan-only
+  --seconds 60 \
+  --plan-only \
+  --plan-out output/demo_generated_plan.json
 ```
 
-Після перевірки або ручного редагування plan його можна озвучити без повторного виклику LLM:
+Перевірка Silero без Gemma:
 
 ```bash
-localtts --plan-in output/plan.json --output output/narration.wav
+localtts \
+  --plan-in examples/demo_plan_uk.json \
+  --device auto \
+  --output output/demo_from_plan.wav
 ```
 
-## 6. Без Ollama
+Повний цикл:
+
+```bash
+localtts \
+  --input examples/demo_narration_uk.txt \
+  --mode edit \
+  --seconds 60 \
+  --device auto \
+  --output output/demo_full.wav
+```
+
+---
+
+# Корисні параметри
+
+## Інша Ollama-модель
+
+```bash
+localtts --input text.txt --ollama-model gemma4:latest
+```
+
+Або:
+
+```bash
+export LOCALTTS_OLLAMA_MODEL=gemma4:latest
+```
+
+## Інший український голос
 
 ```bash
 localtts \
   --input examples/input_uk.txt \
-  --no-llm \
-  --output output/narration.wav
+  --speaker ukr_igor
 ```
 
-У цьому режимі текст не переписується: Python лише розбиває його на речення і додає стандартні паузи.
+## Примусово CUDA
 
-## Голоси Silero
+```bash
+localtts \
+  --input examples/input_uk.txt \
+  --device cuda
+```
+
+## Примусово CPU
+
+```bash
+localtts \
+  --input examples/input_uk.txt \
+  --device cpu
+```
+
+---
+
+# Голоси Silero
 
 MVP використовує:
 
@@ -144,26 +349,30 @@ rate:    48000 Hz
 
 Альтернативний базовий український голос:
 
-```bash
-localtts --input examples/input_uk.txt --speaker ukr_igor
+```text
+ukr_igor
 ```
 
-> Важливо: Silero V5 CIS не має автоматичного визначення українських наголосів. Офіційна документація рекомендує явно задавати наголоси для слов'янських мов. У MVP ми навмисно не доручаємо Gemma автоматично ставити наголоси, оскільки помилковий наголос гірший за відсутній. Наступний етап — словник наголосів + опційне LLM-assisted доповнення лише для невідомих слів.
+> Важливо: Silero V5 CIS не має автоматичного визначення українських наголосів. У MVP Gemma не ставить наголоси автоматично, оскільки неправильно поставлений наголос може погіршити результат. Наступний етап — окремий pronunciation/stress dictionary.
 
-## Local-only
+# Local-only
 
-Після того як Gemma 4 та Silero model уже завантажені в локальний cache, сам pipeline не потребує хмарного TTS/API. Ollama викликається через локальний endpoint `http://localhost:11434`.
+Після завантаження `gemma4:latest` в Ollama та кешування Silero-моделі pipeline може працювати локально без хмарного TTS/API. Ollama викликається через локальний endpoint:
 
-## Наступні кроки
+```text
+http://localhost:11434
+```
+
+# Наступні кроки
 
 - словник українських наголосів та pronunciation overrides;
 - профілі `lecture`, `documentary`, `briefing`, `promo`;
-- автоматичний loudness normalization через FFmpeg (`-16 LUFS`);
+- loudness normalization через FFmpeg (`-16 LUFS`);
 - background music ducking;
 - експорт SRT/VTT таймінгів;
 - інтеграція з відеопайплайном.
 
-## Джерела API
+# Джерела API
 
 - Ollama Structured Outputs: https://docs.ollama.com/capabilities/structured-outputs
 - Ollama Gemma 4: https://ollama.com/library/gemma4
