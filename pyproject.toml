@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "localtts"
+version = "0.1.0"
+description = "Fully local Ukrainian narration pipeline: Ollama/Gemma 4 + Silero TTS"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "ollama>=0.5",
+  "pydantic>=2.7",
+  "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+localtts = "localtts.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
