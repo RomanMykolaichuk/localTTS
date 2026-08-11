@@ -24,7 +24,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seconds", type=int, help="Бажана тривалість наративу")
     parser.add_argument(
         "--ollama-model",
-        default=os.getenv("LOCALTTS_OLLAMA_MODEL", "gemma4:12b"),
+        default=os.getenv("LOCALTTS_OLLAMA_MODEL", "gemma4:latest"),
+        help="Локальна Ollama-модель (default: gemma4:latest)",
     )
     parser.add_argument(
         "--ollama-host",
