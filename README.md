@@ -115,7 +115,11 @@ localtts \
   --plan-only
 ```
 
-Після перевірки `output/plan.json` у наступній версії буде додано окрему команду `render`, щоб озвучувати вручну відредагований plan без повторного виклику LLM.
+Після перевірки або ручного редагування plan його можна озвучити без повторного виклику LLM:
+
+```bash
+localtts --plan-in output/plan.json --output output/narration.wav
+```
 
 ## 6. Без Ollama
 
@@ -152,7 +156,6 @@ localtts --input examples/input_uk.txt --speaker ukr_igor
 
 ## Наступні кроки
 
-- `localtts render plan.json` без повторної генерації;
 - словник українських наголосів та pronunciation overrides;
 - профілі `lecture`, `documentary`, `briefing`, `promo`;
 - автоматичний loudness normalization через FFmpeg (`-16 LUFS`);
